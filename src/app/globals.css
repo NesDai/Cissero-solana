@@ -120,3 +120,18 @@
     @apply bg-background text-foreground;
   }
 }
+
+.custom-scrollbar {
+  scrollbar-width: thin;                /* Firefox */
+  scrollbar-color: #000 #1a1a1a;        /* thumb track */
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #000;
+  border-radius: 4px;
+}
