@@ -1,17 +1,23 @@
 import "./globals.css";
 import AppWalletProvider from "@/components/AppWalletProvider";
+import {AuthContextProvider} from "@/contexts/authContext";
 
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
+
+
 }>) {
-  return (
+
+    return (
     <html lang="en">
       <body>
-      <AppWalletProvider>
-          {children}
-      </AppWalletProvider>
+        <AuthContextProvider>
+          <AppWalletProvider>
+              {children}
+          </AppWalletProvider>
+        </AuthContextProvider>
       </body>
     </html>
   );
