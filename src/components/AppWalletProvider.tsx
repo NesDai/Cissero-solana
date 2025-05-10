@@ -9,7 +9,8 @@ import {
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { clusterApiUrl } from "@solana/web3.js";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
-import "@solana/wallet-adapter-react-ui/styles.css"; // ✅ ES module import
+import "@solana/wallet-adapter-react-ui/styles.css";
+import {AuthContextProvider} from "@/contexts/authContext";
 
 export default function AppWalletProvider({
                                               children,
@@ -27,10 +28,13 @@ export default function AppWalletProvider({
     );
 
     return (
-        <ConnectionProvider endpoint={endpoint}>
-            <WalletProvider wallets={wallets} autoConnect>
-                <WalletModalProvider>{children}</WalletModalProvider>
-            </WalletProvider>
-        </ConnectionProvider>
+        <AuthContextProvider>
+            <ConnectionProvider endpoint={endpoint}>
+                <WalletProvider wallets={wallets} autoConnect>
+                    <WalletModalProvider>{children}</WalletModalProvider>
+                </WalletProvider>
+            </ConnectionProvider>
+        </AuthContextProvider>
+
     );
 }

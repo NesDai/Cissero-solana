@@ -13,11 +13,9 @@ export default function RootLayout({
     return (
     <html lang="en">
       <body>
-        <AuthContextProvider>
           <AppWalletProvider>
               {children}
           </AppWalletProvider>
-        </AuthContextProvider>
       </body>
     </html>
   );
