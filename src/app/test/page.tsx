@@ -31,7 +31,7 @@ export default function Test() {
     // for auth to access user and userdata
     // user is metadata of user
     // userdata is data from firebase
-    const { user, userData } = UserAuth();
+    const { user } = UserAuth();
 
     // // this is to suspend when user change for ui changes
     // useEffect(() => {
@@ -42,7 +42,6 @@ export default function Test() {
     //     checkAuthentication();
     // }, [user]);
 
-    console.log(userData)
     console.log(user)
 
     useEffect(() => {

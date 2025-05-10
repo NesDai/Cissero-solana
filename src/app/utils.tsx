@@ -6,6 +6,10 @@ import {
     Transaction,
     LAMPORTS_PER_SOL
 } from "@solana/web3.js";
+import {collection, deleteDoc, getDocs, updateDoc, where} from "firebase/firestore";
+import {db} from "../../firebase";
+import {doc, getDoc, setDoc} from "@firebase/firestore";
+import {query} from "@firebase/database";
 
 export async function sendTransactionWithWallet(
     connection: Connection,
@@ -59,10 +63,7 @@ export async function sendSOL(publicKey: PublicKey | null, receiverAddress: stri
     }
 }
 
-import {collection, deleteDoc, getDocs, updateDoc, where} from "firebase/firestore";
-import {db} from "../../firebase";
-import {doc, getDoc, setDoc} from "@firebase/firestore";
-import {query} from "@firebase/database";
+
 
 // Fetch all data from a collection
 export async function fetchData(name: string) {
