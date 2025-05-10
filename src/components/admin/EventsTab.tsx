@@ -9,7 +9,7 @@ import {
   CardFooter,
 } from "@/components/ui/card";
 import { Calendar } from "@/components/ui/calendar";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +21,11 @@ import {
   Clock,
   X,
   History,
+  Edit,
+  UserCheck,
+  Trash2,
+  Info,
+  Check,
 } from "lucide-react";
 import { format } from "date-fns";
 import {
@@ -35,46 +40,176 @@ import {
   undoEventAction,
 } from "@/services/eventService";
 import { Modal } from "@/components/admin/modal";
+import { toast } from "@/components/ui/use-toast";
+import { getCurrentAdmin } from "@/services/adminService";
 import ClientOnly from "@/components/ClientOnly";
 
-export function EventsTab() {
+// Define Event type
+interface Event {
+  id: string;
+  title: string;
+  date: Date;
+  time: string;
+  status:
+    | "Scheduled" // Has admin assigned and ready to go
+    | "Needs Admin" // Approved but needs admin assignment
+    | "Completed" // Event has ended
+    | "Pending Approval" // Waiting for admin approval
+    | "Rejected"; // Not approved
+  participants: string[];
+  assignedTo?: string; // Admin assigned to monitor the event
+}
+
+// Add this type definition for event history
+interface EventHistory {
+  id: string;
+  eventId: string;
+  action: string;
+  timestamp: Date;
+  adminId: string;
+  adminName: string;
+  details: string;
+}
+
+// Helper function to get status badge color
+const getStatusColor = (status: string) => {
+  switch (status) {
+    case "Scheduled":
+      return "bg-green-600 text-white";
+    case "Completed":
+      return "bg-blue-600 text-white";
+    case "Needs Admin":
+      return "bg-yellow-600 text-black";
+    case "Pending Approval":
+      return "bg-orange-500 text-white";
+    case "Rejected":
+      return "bg-red-600 text-white";
+    default:
+      return "bg-gray-600 text-white";
+  }
+};
+
+interface EventsTabProps {
+  eventToView?: string | null;
+  eventToAssign?: string | null;
+}
+
+export function EventsTab({ eventToView, eventToAssign }: EventsTabProps = {}) {
+  // All state hooks must be declared at the top level
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
-  const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
+  const [calendarMonth, setCalendarMonth] = useState<Date | undefined>(
+    undefined
+  );
+  const [events, setEvents] = useState<EventType[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState("All");
-  const [events, setEvents] = useState<EventType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedEventHistory, setSelectedEventHistory] = useState<
     string | null
   >(null);
   const [eventHistory, setEventHistory] = useState<EventHistory[]>([]);
-
-  // fetch once on mount
-  useEffect(() => {
-    async function load() {
-      setIsLoading(true);
-      try {
-        const data = await fetchEvents();
-        setEvents(data);
-      } catch (err) {
-        console.error("Failed loading events:", err);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    load();
-  }, []);
-
-  // editing state & handlers
+  const [isClient, setIsClient] = useState(false);
   const [editing, setEditing] = useState<EventType | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [viewingEvent, setViewingEvent] = useState<EventType | null>(null);
+
+  const calendarRef = useRef<HTMLDivElement>(null);
+
+  // Initialize state after component mounts
+  useEffect(() => {
+    setIsClient(true);
+
+    // Set dates only on client-side to avoid hydration mismatch
+    setSelectedDate(new Date());
+    setCalendarMonth(new Date());
+
+    // Load events
+    fetchEvents()
+      .then((data) => {
+        setEvents(data);
+        setIsLoading(false);
+      })
+      .catch((err) => {
+        console.error("Failed to load events:", err);
+        setIsLoading(false);
+      });
+  }, []);
+
+  // Effect for applying styles after every render
+  useEffect(() => {
+    // Function to apply styles to calendar items
+    const applyCalendarStyles = () => {
+      if (!calendarRef.current) return;
+
+      // Find all selected day cells
+      const selectedDays = calendarRef.current.querySelectorAll(
+        '[data-selected="true"]'
+      );
+      selectedDays.forEach((day) => {
+        const button = day.querySelector("button");
+        if (button) {
+          button.style.backgroundColor = "#2563EB";
+          button.style.color = "white";
+        }
+      });
+
+      // Find all highlighted day cells (those with events)
+      const highlightedDays =
+        calendarRef.current.querySelectorAll(".highlighted");
+      highlightedDays.forEach((day) => {
+        const button = day.querySelector("button");
+        if (button) {
+          button.style.backgroundColor = "#166534";
+          button.style.color = "white";
+        }
+      });
+    };
+
+    // Apply styles and set up a mutation observer to catch DOM changes
+    setTimeout(applyCalendarStyles, 100);
+
+    // Set up a mutation observer to watch for changes
+    if (calendarRef.current) {
+      const observer = new MutationObserver(applyCalendarStyles);
+      observer.observe(calendarRef.current, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ["data-selected", "class"],
+      });
+
+      return () => observer.disconnect();
+    }
+  }, [selectedDate, calendarMonth, events]);
+
+  // Add effect to handle viewing events
+  useEffect(() => {
+    if (eventToView) {
+      const event = events.find((e) => e.id === eventToView);
+      if (event) {
+        handleViewEventDetails(event);
+      }
+    }
+  }, [eventToView, events]);
+
+  // Add effect to handle assigning events
+  useEffect(() => {
+    if (eventToAssign) {
+      handleAssignEvent(eventToAssign);
+    }
+  }, [eventToAssign]);
+
   const handleEdit = (e: EventType) => setEditing(e);
+
   const handleDelete = async (id: string) => {
     if (!confirm("Really delete this event?")) return;
     await deleteEvent(id);
     const data = await fetchEvents();
     setEvents(data);
   };
+
   const handleSave = async (updates: Partial<EventType>) => {
     if (!editing) return;
     await updateEvent(editing.id, updates);
@@ -83,42 +218,18 @@ export function EventsTab() {
     setEvents(data);
   };
 
-  // Handle creating a new event
-  const handleCreateNew = () => {
-    setIsCreating(true);
-  };
-
-  // Handle saving a new event
-  const handleSaveNew = async (data: Omit<EventType, "id">) => {
-    await createEvent(data);
-    setIsCreating(false);
-    const refreshedEvents = await fetchEvents();
-    setEvents(refreshedEvents);
-  };
-
-  // Add these handlers
-  const handleApprove = async (id: string) => {
-    await approveEvent(id);
-    const data = await fetchEvents();
-    setEvents(data);
-  };
-
-  const handleReject = async (id: string) => {
-    const reason = prompt("Please provide a reason for rejection:", "");
-    if (reason === null) return; // User cancelled
-
-    await rejectEvent(id, reason);
-    const data = await fetchEvents();
-    setEvents(data);
-  };
-
   // Filter events based on search term and status filter
   const filteredEvents = events.filter((event) => {
     const matchesSearch =
       event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      event.participants.some((p) =>
-        p.name.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+      event.participants.some((p) => {
+        if (typeof p === "string") {
+          return p.toLowerCase().includes(searchTerm.toLowerCase());
+        } else if (typeof p === "object" && p !== null && "name" in p) {
+          return p.name.toLowerCase().includes(searchTerm.toLowerCase());
+        }
+        return false;
+      });
 
     const matchesFilter =
       activeFilter === "All" || event.status === activeFilter;
@@ -138,6 +249,7 @@ export function EventsTab() {
   // Function to handle month navigation
   const handleMonthChange = (direction: "prev" | "next") => {
     setCalendarMonth((prevMonth) => {
+      if (!prevMonth) return new Date();
       const newMonth = new Date(prevMonth);
       if (direction === "prev") {
         newMonth.setMonth(newMonth.getMonth() - 1);
@@ -150,16 +262,17 @@ export function EventsTab() {
 
   // Function to jump to current month
   const goToCurrentMonth = () => {
+    setSelectedDate(new Date());
     setCalendarMonth(new Date());
   };
 
-  // Update your filter options
+  // Filter options for the events list
   const filterOptions = [
     "All",
-    "Pending Approval",
     "Scheduled",
     "Needs Admin",
     "Completed",
+    "Pending Approval",
     "Rejected",
   ];
 
@@ -168,7 +281,7 @@ export function EventsTab() {
     setIsLoading(true);
     try {
       const history = await getEventHistory(eventId);
-      setEventHistory(history);
+      setEventHistory(history as unknown as EventHistory[]);
       setSelectedEventHistory(eventId);
     } catch (err) {
       console.error("Failed to load history:", err);
@@ -177,13 +290,9 @@ export function EventsTab() {
     }
   };
 
-  // Simplify the undo function
+  // Function to handle undoing an event action
   const handleUndo = async (eventId: string) => {
-    if (
-      !confirm(
-        "Are you sure you want to undo this action? This will revert the event to its previous state."
-      )
-    ) {
+    if (!confirm("Are you sure you want to undo this action?")) {
       return;
     }
 
@@ -198,456 +307,483 @@ export function EventsTab() {
       // Close the history modal
       setSelectedEventHistory(null);
 
-      // Show success message
-      alert("Action successfully undone!");
+      toast({
+        title: "Success",
+        description: "Action successfully undone!",
+        variant: "default",
+      });
     } catch (err) {
       console.error("Failed to undo action:", err);
-      alert("Failed to undo action. Please try again.");
+      toast({
+        title: "Error",
+        description: "Failed to undo action",
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Function to handle assigning an event to the current admin
+  const handleAssignEvent = async (eventId: string) => {
+    setIsLoading(true);
+    try {
+      const admin = getCurrentAdmin();
+      if (!admin) {
+        toast({
+          title: "Error",
+          description: "You must be logged in to assign events",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Update the event with the admin assignment and change status to Scheduled
+      const updatedEvent = await updateEvent(eventId, {
+        status: "Scheduled",
+        assignedTo: admin.name,
+        assignedAt: new Date(),
+      });
+
+      // Update the events list
+      setEvents((prev) =>
+        prev.map((e) => (e.id === eventId ? updatedEvent : e))
+      );
+
+      toast({
+        title: "Event Assigned",
+        description: "You have been assigned to monitor this event",
+      });
+    } catch (error) {
+      console.error("Error assigning event:", error);
+      toast({
+        title: "Error",
+        description: "Failed to assign event",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Function to handle approving a pending event
+  const handleApproveEvent = async (eventId: string) => {
+    try {
+      await approveEvent(eventId);
+      const data = await fetchEvents();
+      setEvents(data);
+
+      toast({
+        title: "Success",
+        description: "Event approved successfully!",
+        variant: "default",
+      });
+    } catch (error) {
+      console.error("Error approving event:", error);
+      toast({
+        title: "Error",
+        description: "Failed to approve event. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Function to handle rejecting a pending event
+  const handleRejectEvent = async (eventId: string) => {
+    try {
+      await rejectEvent(eventId);
+      const data = await fetchEvents();
+      setEvents(data);
+
+      toast({
+        title: "Success",
+        description: "Event rejected successfully!",
+        variant: "default",
+      });
+    } catch (error) {
+      console.error("Error rejecting event:", error);
+      toast({
+        title: "Error",
+        description: "Failed to reject event. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Add a function to handle viewing event details
+  const handleViewEventDetails = (event: EventType) => {
+    // Set the event for viewing details instead of editing
+    setViewingEvent(event);
+  };
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <Card className="bg-black bg-opacity-50 border-green-500 text-white lg:col-span-2">
-        <CardHeader>
-          <div className="flex justify-between items-center">
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Calendar Card */}
+        <Card className="bg-black bg-opacity-50 border-green-500 text-white md:col-span-1">
+          <CardHeader>
             <CardTitle className="text-[20px] text-white">
-              Event Management
+              Event Calendar
             </CardTitle>
-            <ClientOnly>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex justify-between items-center mb-4">
               <Button
                 variant="outline"
-                className="bg-green-600 text-white border-green-500 hover:bg-green-500"
-                onClick={handleCreateNew}
+                className="bg-gray-800 text-white border-gray-700 hover:bg-gray-700"
+                onClick={goToCurrentMonth}
               >
-                Create New Event
+                Today
               </Button>
-            </ClientOnly>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-4">
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <Input
-                  placeholder="Search events by title or participant..."
-                  className="bg-gray-800 border-gray-700 text-white w-full"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
+              <div className="flex space-x-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="bg-gray-800 text-white border-gray-700 hover:bg-gray-700"
+                  onClick={() => handleMonthChange("prev")}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="bg-gray-800 text-white border-gray-700 hover:bg-gray-700"
+                  onClick={() => handleMonthChange("next")}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
               </div>
-              <Button
-                className="bg-green-500 text-black hover:bg-green-400"
-                onClick={() => {
-                  /* Additional search logic if needed */
-                }}
-              >
-                <Search className="h-4 w-4 mr-2" />
-                Search
-              </Button>
             </div>
-          </div>
 
-          <div className="flex gap-2 mb-4">
-            {filterOptions.map((option) => (
-              <Badge
-                key={option}
-                className={`cursor-pointer ${
-                  activeFilter === option
-                    ? "bg-green-500 text-black"
-                    : "bg-gray-700 text-white hover:bg-gray-600"
-                }`}
-                onClick={() => setActiveFilter(option)}
-              >
-                {option}
-              </Badge>
-            ))}
-          </div>
+            {/* Wrap the Calendar in ClientOnly to prevent hydration errors */}
+            <ClientOnly>
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                onSelect={setSelectedDate}
+                month={calendarMonth}
+                onMonthChange={setCalendarMonth}
+                className="border-gray-700 text-white calendar-custom"
+                classNames={{
+                  day_today: "bg-gray-700 text-white",
+                  day_selected: "bg-gray-800 text-white",
+                  day: "text-white hover:bg-gray-700",
+                  day_disabled: "text-gray-600",
+                  head_cell: "text-gray-400",
+                  caption: "text-white",
+                  nav_button:
+                    "border border-gray-700 bg-gray-800 text-white hover:bg-gray-700",
+                  table: "border-gray-700",
+                }}
+                modifiers={{
+                  highlighted: (date) =>
+                    eventDates.includes(date.toDateString()),
+                }}
+                modifiersClassNames={{
+                  highlighted: "bg-green-800 text-white",
+                }}
+              />
+            </ClientOnly>
 
-          <ClientOnly>
-            <div className="space-y-4">
-              {isLoading ? (
-                <div className="text-center py-8">
-                  <div className="animate-spin h-8 w-8 border-4 border-green-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-                  <p className="text-gray-400">Loading events...</p>
-                </div>
-              ) : filteredEvents.length > 0 ? (
-                filteredEvents.map((event) => (
-                  <Card
-                    key={event.id}
-                    className="bg-gray-900 border-gray-700 mb-4"
-                  >
-                    <CardHeader className="pb-2">
-                      <div className="flex justify-between items-start">
-                        <CardTitle className="text-white text-lg">
-                          {event.title}
-                        </CardTitle>
-                        <Badge
-                          className={
-                            event.status === "Completed"
-                              ? "bg-green-500 text-black"
-                              : event.status === "Scheduled"
-                              ? "bg-blue-500 text-white"
-                              : event.status === "Pending Approval"
-                              ? "bg-purple-500 text-white"
-                              : event.status === "Rejected"
-                              ? "bg-red-500 text-white"
-                              : "bg-yellow-500 text-black"
-                          }
-                        >
-                          {event.status}
-                        </Badge>
-                      </div>
-                      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                        <div className="flex items-center text-gray-400">
-                          <CalendarIcon className="h-3 w-3 mr-1" />
-                          <span>Date:</span>
+            {/* Calendar Legend */}
+            <div className="mt-4 flex items-center text-sm text-gray-400">
+              <div className="flex items-center mr-4">
+                <div className="w-4 h-4 bg-green-800 rounded-sm mr-2"></div>
+                <span>Events scheduled</span>
+              </div>
+            </div>
+
+            {selectedDate && (
+              <div className="mt-4">
+                <h3 className="text-lg font-semibold text-white">
+                  Events on {format(selectedDate, "EEE MMM d yyyy")}
+                </h3>
+                {eventsOnSelectedDate.length === 0 ? (
+                  <p className="text-gray-400">
+                    No events scheduled for this day.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {eventsOnSelectedDate.map((event) => (
+                      <div
+                        key={event.id}
+                        className="bg-gray-800 p-3 rounded border border-gray-700 mt-2"
+                      >
+                        <div className="flex justify-between">
+                          <h4 className="font-medium text-white">
+                            {event.title}
+                          </h4>
+                          <Badge className={getStatusColor(event.status)}>
+                            {event.status}
+                          </Badge>
                         </div>
-                        <div className="text-white">
-                          {format(event.date, "MMM d, yyyy")}
-                        </div>
-
-                        <div className="flex items-center text-gray-400">
-                          <Clock className="h-3 w-3 mr-1" />
-                          <span>Time:</span>
-                        </div>
-                        <div className="text-white">{event.time}</div>
-                      </div>
-
-                      {event.createdBy && (
-                        <div className="mt-1 flex items-center text-xs text-gray-400">
-                          <span className="mr-1">Requested by:</span>
-                          <span className="text-gray-300">
-                            {event.createdBy}
-                          </span>
-                        </div>
-                      )}
-
-                      {event.status === "Rejected" && event.rejectionReason && (
-                        <div className="mt-1 flex items-center text-xs text-red-400">
-                          <span className="mr-1">Rejected:</span>
-                          <span>{event.rejectionReason}</span>
-                        </div>
-                      )}
-                    </CardHeader>
-
-                    <CardContent className="py-2">
-                      <div className="border-t border-gray-800 pt-2">
-                        <h4 className="text-gray-400 text-xs uppercase mb-1">
-                          Participants
-                        </h4>
-                        <div className="flex flex-wrap gap-1">
-                          {event.participants.map((participant) => (
-                            <Badge
-                              key={participant.id}
-                              className="bg-gray-800 text-gray-300 border border-gray-700"
-                              title={`ID: ${participant.id}`}
-                            >
-                              {participant.name}
+                        <p className="text-gray-400 text-sm">{event.time}</p>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {event.participants.map((participant, i) => (
+                            <Badge key={i} className="bg-gray-700 text-white">
+                              {typeof participant === "string"
+                                ? participant
+                                : participant.name}
                             </Badge>
                           ))}
                         </div>
                       </div>
-                    </CardContent>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-                    <CardFooter className="pt-2 flex justify-end gap-2">
+        {/* Events List Card */}
+        <Card className="bg-black bg-opacity-50 border-green-500 text-white md:col-span-2">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-[20px] text-white">
+              Manage Events
+            </CardTitle>
+            <div>
+              <Button
+                className="bg-green-500 text-black hover:bg-green-400"
+                onClick={() => setIsCreating(true)}
+                data-create-event
+              >
+                Create New Event
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Search and filter */}
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
+                <Input
+                  placeholder="Search events..."
+                  className="pl-8 bg-gray-800 border-gray-700 text-white"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <div className="flex-shrink-0 w-full md:w-auto">
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <Button
+                    variant={activeFilter === "All" ? "default" : "outline"}
+                    className={
+                      activeFilter === "All"
+                        ? "bg-green-500 text-black hover:bg-green-400"
+                        : "bg-gray-800 text-white hover:bg-gray-700"
+                    }
+                    onClick={() => setActiveFilter("All")}
+                  >
+                    All
+                  </Button>
+                  <Button
+                    variant={
+                      activeFilter === "Scheduled" ? "default" : "outline"
+                    }
+                    className={
+                      activeFilter === "Scheduled"
+                        ? "bg-green-500 text-black hover:bg-green-400"
+                        : "bg-gray-800 text-white hover:bg-gray-700"
+                    }
+                    onClick={() => setActiveFilter("Scheduled")}
+                  >
+                    Scheduled
+                  </Button>
+                  <Button
+                    variant={
+                      activeFilter === "Needs Admin" ? "default" : "outline"
+                    }
+                    className={
+                      activeFilter === "Needs Admin"
+                        ? "bg-green-500 text-black hover:bg-green-400"
+                        : "bg-gray-800 text-white hover:bg-gray-700"
+                    }
+                    onClick={() => setActiveFilter("Needs Admin")}
+                  >
+                    Needs Admin
+                  </Button>
+                  <Button
+                    variant={
+                      activeFilter === "Pending Approval"
+                        ? "default"
+                        : "outline"
+                    }
+                    className={
+                      activeFilter === "Pending Approval"
+                        ? "bg-green-500 text-black hover:bg-green-400"
+                        : "bg-gray-800 text-white hover:bg-gray-700"
+                    }
+                    onClick={() => setActiveFilter("Pending Approval")}
+                  >
+                    Pending Approval
+                  </Button>
+                  <Button
+                    variant={
+                      activeFilter === "Completed" ? "default" : "outline"
+                    }
+                    className={
+                      activeFilter === "Completed"
+                        ? "bg-green-500 text-black hover:bg-green-400"
+                        : "bg-gray-800 text-white hover:bg-gray-700"
+                    }
+                    onClick={() => setActiveFilter("Completed")}
+                  >
+                    Completed
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Events grid */}
+            <div className="grid grid-cols-1 gap-4">
+              {filteredEvents.length > 0 ? (
+                filteredEvents.map((event) => (
+                  <Card
+                    key={event.id}
+                    className="bg-black bg-opacity-50 border-green-500 overflow-hidden"
+                  >
+                    <CardHeader className="pb-2">
+                      <div className="flex justify-between items-start">
+                        <CardTitle className="text-lg text-white">
+                          {event.title}
+                        </CardTitle>
+                        <Badge className={getStatusColor(event.status)}>
+                          {event.status}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pb-2">
+                      <div className="space-y-1 text-sm">
+                        <div className="flex items-center text-gray-400">
+                          <CalendarIcon className="h-4 w-4 mr-1" />
+                          {event.date
+                            ? format(new Date(event.date), "MMMM d, yyyy")
+                            : "Date not set"}
+                        </div>
+                        <div className="flex items-center text-gray-400">
+                          <Clock className="h-4 w-4 mr-1" />
+                          {event.time || "Time not set"}
+                        </div>
+                        {event.assignedTo && (
+                          <div className="flex items-center text-gray-400">
+                            <UserCheck className="h-4 w-4 mr-1" />
+                            Assigned to: {event.assignedTo}
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                    <CardFooter className="pt-2 flex justify-between">
                       <Button
-                        variant="outline"
+                        variant="secondary"
                         size="sm"
-                        className="mr-auto bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700"
-                        onClick={() => handleViewHistory(event.id)}
+                        className="bg-gray-700 text-white hover:bg-gray-600"
+                        data-view-event={event.id}
+                        onClick={() => handleViewEventDetails(event)}
                       >
-                        <History className="h-4 w-4 mr-1" />
-                        History
+                        <Info className="h-3.5 w-3.5 mr-1" />
+                        View
                       </Button>
 
-                      {event.status === "Pending Approval" ? (
-                        <>
+                      {/* Show different action buttons based on status */}
+                      {event.status === "Needs Admin" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="bg-green-600 text-white border-green-500 hover:bg-green-500"
+                          data-assign-event={event.id}
+                          onClick={() => handleAssignEvent(event.id)}
+                        >
+                          <UserCheck className="h-3.5 w-3.5 mr-1" />
+                          Assign Me
+                        </Button>
+                      )}
+
+                      {event.status === "Pending Approval" && (
+                        <div className="flex gap-1">
                           <Button
                             variant="outline"
                             size="sm"
                             className="bg-green-600 text-white border-green-500 hover:bg-green-500"
-                            onClick={() => handleApprove(event.id)}
+                            onClick={() => handleApproveEvent(event.id)}
                           >
+                            <Check className="h-3.5 w-3.5 mr-1" />
                             Approve
                           </Button>
                           <Button
                             variant="outline"
                             size="sm"
                             className="bg-red-600 text-white border-red-500 hover:bg-red-500"
-                            onClick={() => handleReject(event.id)}
+                            onClick={() => handleRejectEvent(event.id)}
                           >
+                            <X className="h-3.5 w-3.5 mr-1" />
                             Reject
                           </Button>
-                        </>
-                      ) : (
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="bg-gray-800 text-white border-gray-700 hover:bg-gray-700"
-                            onClick={() => handleEdit(event)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="bg-red-600 text-white border-red-500 hover:bg-red-500"
-                            onClick={() => handleDelete(event.id)}
-                          >
-                            Delete
-                          </Button>
-                        </>
+                        </div>
+                      )}
+
+                      {event.status === "Scheduled" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="bg-purple-600 text-white border-purple-500 hover:bg-purple-500"
+                          onClick={() => handleCompleteEvent(event.id)}
+                        >
+                          <Check className="h-3.5 w-3.5 mr-1" />
+                          Complete
+                        </Button>
                       )}
                     </CardFooter>
                   </Card>
                 ))
               ) : (
-                <div className="text-center py-8 text-gray-400">
+                <div className="text-center p-8 text-gray-400">
                   No events found matching your criteria
                 </div>
               )}
             </div>
-          </ClientOnly>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
-      <Card className="bg-black bg-opacity-50 border-green-500 text-white">
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle className="text-[18px] text-white">
-              Event Calendar
-            </CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-gray-800 border-gray-700 text-white hover:bg-gray-700"
-              onClick={goToCurrentMonth}
-            >
-              Today
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="flex justify-between items-center mb-4">
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-gray-800 border-gray-700 text-white hover:bg-gray-700"
-              onClick={() => handleMonthChange("prev")}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <h3 className="text-white font-medium">
-              {format(calendarMonth, "MMMM yyyy")}
-            </h3>
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-gray-800 border-gray-700 text-white hover:bg-gray-700"
-              onClick={() => handleMonthChange("next")}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-
-          <div className="mb-4 flex justify-center items-center">
-            <Calendar
-              mode="single"
-              selected={selectedDate}
-              onSelect={setSelectedDate}
-              month={calendarMonth}
-              onMonthChange={setCalendarMonth}
-              className="w-full"
-              classNames={{
-                day_today: "border border-green-500 text-white",
-                day: "text-white hover:bg-gray-700 text-center",
-                day_selected:
-                  "!bg-green-500 !text-black !font-bold hover:!bg-green-500",
-                day_outside: "text-gray-500 opacity-50",
-                head_cell: "text-gray-400 font-medium text-center py-3",
-                cell: "text-center p-0 relative h-12",
-                button:
-                  "h-10 w-10 p-0 font-normal text-center mx-auto rounded-md",
-                nav: "hidden !important",
-                nav_button: "hidden !important",
-                nav_button_previous: "hidden !important",
-                nav_button_next: "hidden !important",
-                caption: "hidden",
-                caption_label: "hidden",
-                table: "w-full border-collapse space-y-1 mx-auto",
-                row: "flex justify-center w-full mt-2",
-                head_row: "flex justify-center w-full mb-2",
-                root: "bg-gray-900 border-gray-700 p-6 rounded-md mx-auto",
-                months: "flex justify-center w-full",
-                month: "w-full flex flex-col items-center",
-              }}
-            />
-          </div>
-
-          <div className="mt-4">
-            <div className="flex items-center gap-2 mb-2">
-              <CalendarIcon className="h-4 w-4 text-green-500" />
-              <h3 className="text-white font-medium">
-                Events on{" "}
-                {selectedDate
-                  ? format(selectedDate, "MMM d, yyyy")
-                  : "Selected Date"}
-              </h3>
-            </div>
-            {eventsOnSelectedDate.length > 0 ? (
-              <div className="space-y-2">
-                {eventsOnSelectedDate.map((event) => (
-                  <div
-                    key={event.id}
-                    className="bg-gray-800 p-3 rounded text-sm border-l-4 border-green-500"
-                  >
-                    <div className="flex justify-between">
-                      <span className="font-medium">{event.title}</span>
-                      <Badge
-                        className={
-                          event.status === "Completed"
-                            ? "bg-green-500 text-black"
-                            : event.status === "Scheduled"
-                            ? "bg-blue-500 text-white"
-                            : "bg-yellow-500 text-black"
-                        }
-                      >
-                        {event.status}
-                      </Badge>
-                    </div>
-                    <div className="text-gray-400 text-xs mt-1">
-                      {event.time} • {event.participants.join(" vs ")}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-gray-400 text-sm">No events on this date</p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* render the edit‐form modal when an event is being edited */}
-      {editing && (
-        <EditEventModal
-          event={editing}
-          onSave={handleSave}
-          onClose={() => setEditing(null)}
-        />
-      )}
-
-      {isCreating && (
-        <CreateEventModal
-          onSave={handleSaveNew}
-          onClose={() => setIsCreating(false)}
-        />
-      )}
-
+      {/* Event History Modal */}
       {selectedEventHistory && (
         <Modal onClose={() => setSelectedEventHistory(null)}>
-          <div className="space-y-4">
-            <h2 className="text-xl font-bold text-white">
-              {events.find((e) => e.id === selectedEventHistory)?.title ||
-                "Event"}{" "}
-              History
-            </h2>
-
-            {eventHistory.length === 0 ? (
-              <p className="text-gray-400">
-                No history available for this event.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {eventHistory.map((record, index) => {
-                  const event = events.find((e) => e.id === record.eventId);
-                  const actionLabels = {
-                    approve: "Approved",
-                    reject: "Rejected",
-                    update: "Updated",
-                    delete: "Deleted",
-                  };
-
-                  return (
-                    <div key={index} className="bg-gray-800 p-3 rounded-md">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="text-white font-medium">
-                            <span className="font-bold">
-                              {actionLabels[record.action]}
-                            </span>{" "}
-                            {event?.title || record.previousState.title}
-                          </p>
-                          <p className="text-xs text-gray-400">
-                            {new Date(record.timestamp).toLocaleString()}
-                          </p>
-                        </div>
-
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="bg-blue-600 text-white border-blue-500 hover:bg-blue-500"
-                          onClick={() => handleUndo(record.eventId)}
-                        >
-                          Undo This Action
-                        </Button>
+          <div className="p-6 bg-gray-900 rounded-lg">
+            <h2 className="text-xl font-bold text-white mb-4">Event History</h2>
+            <div className="space-y-4 max-h-[400px] overflow-y-auto">
+              {eventHistory.map((item, index) => (
+                <div
+                  key={index}
+                  className="bg-gray-800 p-3 rounded border border-gray-700"
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <span className="font-semibold text-white">
+                        {item.action}
+                      </span>
+                      <div className="text-sm text-gray-400">
+                        by {item.adminName} on {format(item.timestamp, "PPP p")}
                       </div>
-
-                      {record.action === "update" && (
-                        <div className="mt-2 text-sm">
-                          <p className="text-gray-400">Changed from:</p>
-                          <div className="bg-gray-900 p-2 rounded mt-1">
-                            <p>Status: {record.previousState.status}</p>
-                            <p>
-                              Participants:{" "}
-                              {record.previousState.participants.join(", ")}
-                            </p>
-                            <p>Time: {record.previousState.time}</p>
-                            <p>
-                              Date:{" "}
-                              {format(record.previousState.date, "MMM d, yyyy")}
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                      {record.action === "reject" && (
-                        <div className="mt-2 text-sm">
-                          <p className="text-gray-400">Rejection details:</p>
-                          <div className="bg-gray-900 p-2 rounded mt-1">
-                            <p>
-                              Reason:{" "}
-                              {record.previousState.rejectionReason ||
-                                "No reason provided"}
-                            </p>
-                            <p>
-                              Previous status: {record.previousState.status}
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                      {record.action === "approve" && (
-                        <div className="mt-2 text-sm">
-                          <p className="text-gray-400">Approval details:</p>
-                          <div className="bg-gray-900 p-2 rounded mt-1">
-                            <p>Changed from: {record.previousState.status}</p>
-                            <p>
-                              Requested by:{" "}
-                              {record.previousState.createdBy || "Unknown"}
-                            </p>
-                          </div>
-                        </div>
-                      )}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-
-            <div className="flex justify-end mt-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-yellow-600 text-white border-yellow-500 hover:bg-yellow-500"
+                      onClick={() => handleUndo(item.eventId)}
+                    >
+                      Undo
+                    </Button>
+                  </div>
+                  {item.details && (
+                    <div className="mt-2 text-sm text-gray-300">
+                      {item.details}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-end">
               <Button
                 variant="outline"
                 className="bg-gray-800 text-white border-gray-700 hover:bg-gray-700"
@@ -658,6 +794,36 @@ export function EventsTab() {
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* Edit Event Modal */}
+      {editing && (
+        <EditEventModal
+          event={editing}
+          onSave={handleSave}
+          onClose={() => setEditing(null)}
+        />
+      )}
+
+      {/* Create Event Modal */}
+      {isCreating && (
+        <CreateEventModal
+          onSave={async (data) => {
+            await createEvent(data);
+            setIsCreating(false);
+            const refreshedEvents = await fetchEvents();
+            setEvents(refreshedEvents);
+          }}
+          onClose={() => setIsCreating(false)}
+        />
+      )}
+
+      {/* Event Details Modal */}
+      {viewingEvent && (
+        <EventDetailsModal
+          event={viewingEvent}
+          onClose={() => setViewingEvent(null)}
+        />
       )}
     </div>
   );
@@ -676,6 +842,8 @@ export function EditEventModal({
   const [date, setDate] = useState<Date | undefined>(event.date);
   const [time, setTime] = useState(event.time);
   const [status, setStatus] = useState<EventType["status"]>(event.status);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
 
   // Instead of a comma-separated string, manage participants as objects
   const [participants, setParticipants] = useState<
@@ -741,7 +909,7 @@ export function EditEventModal({
                 onClick={() => setShowDatePicker(!showDatePicker)}
               >
                 <span className="text-white">
-                  {format(date, "MMMM d, yyyy")}
+                  {date ? format(date, "MMMM d, yyyy") : "Select date"}
                 </span>
                 <CalendarIcon className="h-4 w-4 text-green-500" />
               </div>
@@ -760,15 +928,17 @@ export function EditEventModal({
                         className="text-white hover:bg-gray-800"
                         onClick={(e) => {
                           e.stopPropagation();
-                          const prevMonth = new Date(date);
-                          prevMonth.setMonth(prevMonth.getMonth() - 1);
-                          setDate(prevMonth);
+                          if (date) {
+                            const prevMonth = new Date(date);
+                            prevMonth.setMonth(prevMonth.getMonth() - 1);
+                            setDate(prevMonth);
+                          }
                         }}
                       >
                         <ChevronLeft className="h-4 w-4 text-green-500" />
                       </Button>
                       <span className="text-white font-medium">
-                        {format(date, "MMMM yyyy")}
+                        {date ? format(date, "MMMM yyyy") : "Select date"}
                       </span>
                       <Button
                         variant="ghost"
@@ -776,9 +946,11 @@ export function EditEventModal({
                         className="text-white hover:bg-gray-800"
                         onClick={(e) => {
                           e.stopPropagation();
-                          const nextMonth = new Date(date);
-                          nextMonth.setMonth(nextMonth.getMonth() + 1);
-                          setDate(nextMonth);
+                          if (date) {
+                            const nextMonth = new Date(date);
+                            nextMonth.setMonth(nextMonth.getMonth() + 1);
+                            setDate(nextMonth);
+                          }
                         }}
                       >
                         <ChevronRight className="h-4 w-4 text-green-500" />
@@ -854,7 +1026,9 @@ export function EditEventModal({
                             className="w-full bg-gray-800 border border-gray-700 rounded-md p-1 text-white"
                             value={time.split(":")[0]}
                             onChange={(e) => {
-                              const [_, minutes, ampm] = time.split(/[:\s]/);
+                              const parts = time.split(/[:\s]/);
+                              const minutes = parts[1];
+                              const ampm = parts[2];
                               setTime(`${e.target.value}:${minutes} ${ampm}`);
                             }}
                           >
@@ -876,7 +1050,9 @@ export function EditEventModal({
                             className="w-full bg-gray-800 border border-gray-700 rounded-md p-1 text-white"
                             value={time.split(":")[1].split(" ")[0]}
                             onChange={(e) => {
-                              const [hours, _, ampm] = time.split(/[:\s]/);
+                              const parts = time.split(/[:\s]/);
+                              const hours = parts[0];
+                              const ampm = parts[2];
                               setTime(`${hours}:${e.target.value} ${ampm}`);
                             }}
                           >
@@ -1056,6 +1232,8 @@ export function CreateEventModal({
     isAdmin ? "Scheduled" : "Pending Approval"
   );
   const [createdBy, setCreatedBy] = useState("");
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
 
   // Manage participants as objects with IDs
   const [participants, setParticipants] = useState<
@@ -1121,7 +1299,7 @@ export function CreateEventModal({
                 onClick={() => setShowDatePicker(!showDatePicker)}
               >
                 <span className="text-white">
-                  {format(date, "MMMM d, yyyy")}
+                  {date ? format(date, "MMMM d, yyyy") : "Select date"}
                 </span>
                 <CalendarIcon className="h-4 w-4 text-green-500" />
               </div>
@@ -1140,15 +1318,17 @@ export function CreateEventModal({
                         className="text-white hover:bg-gray-800"
                         onClick={(e) => {
                           e.stopPropagation();
-                          const prevMonth = new Date(date);
-                          prevMonth.setMonth(prevMonth.getMonth() - 1);
-                          setDate(prevMonth);
+                          if (date) {
+                            const prevMonth = new Date(date);
+                            prevMonth.setMonth(prevMonth.getMonth() - 1);
+                            setDate(prevMonth);
+                          }
                         }}
                       >
                         <ChevronLeft className="h-4 w-4 text-green-500" />
                       </Button>
                       <span className="text-white font-medium">
-                        {format(date, "MMMM yyyy")}
+                        {date ? format(date, "MMMM yyyy") : "Select date"}
                       </span>
                       <Button
                         variant="ghost"
@@ -1156,9 +1336,11 @@ export function CreateEventModal({
                         className="text-white hover:bg-gray-800"
                         onClick={(e) => {
                           e.stopPropagation();
-                          const nextMonth = new Date(date);
-                          nextMonth.setMonth(nextMonth.getMonth() + 1);
-                          setDate(nextMonth);
+                          if (date) {
+                            const nextMonth = new Date(date);
+                            nextMonth.setMonth(nextMonth.getMonth() + 1);
+                            setDate(nextMonth);
+                          }
                         }}
                       >
                         <ChevronRight className="h-4 w-4 text-green-500" />
@@ -1234,7 +1416,9 @@ export function CreateEventModal({
                             className="w-full bg-gray-800 border border-gray-700 rounded-md p-1 text-white"
                             value={time.split(":")[0]}
                             onChange={(e) => {
-                              const [_, minutes, ampm] = time.split(/[:\s]/);
+                              const parts = time.split(/[:\s]/);
+                              const minutes = parts[1];
+                              const ampm = parts[2];
                               setTime(`${e.target.value}:${minutes} ${ampm}`);
                             }}
                           >
@@ -1256,7 +1440,9 @@ export function CreateEventModal({
                             className="w-full bg-gray-800 border border-gray-700 rounded-md p-1 text-white"
                             value={time.split(":")[1].split(" ")[0]}
                             onChange={(e) => {
-                              const [hours, _, ampm] = time.split(/[:\s]/);
+                              const parts = time.split(/[:\s]/);
+                              const hours = parts[0];
+                              const ampm = parts[2];
                               setTime(`${hours}:${e.target.value} ${ampm}`);
                             }}
                           >
@@ -1356,7 +1542,8 @@ export function CreateEventModal({
             className="bg-gray-800 border-gray-700 text-white"
           />
           <p className="text-xs text-gray-400">
-            Separate participants with commas (e.g., "Player A, Player B")
+            Separate participants with commas (e.g., &quot;Player A, Player
+            B&quot;)
           </p>
         </div>
 
@@ -1396,3 +1583,199 @@ export function CreateEventModal({
     </Modal>
   );
 }
+
+export function EventDetailsModal({
+  event,
+  onClose,
+}: {
+  event: EventType;
+  onClose: () => void;
+}) {
+  return (
+    <Modal onClose={onClose}>
+      <div className="space-y-6 p-6">
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-bold text-white">{event.title}</h2>
+          <Badge className={getStatusColor(event.status)}>{event.status}</Badge>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <h3 className="text-lg font-semibold text-white mb-2">
+              Event Details
+            </h3>
+            <div className="space-y-2">
+              <div>
+                <span className="text-gray-400">Date:</span>{" "}
+                <span className="text-white">
+                  {event.date
+                    ? format(new Date(event.date), "MMMM d, yyyy")
+                    : "Not set"}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-400">Time:</span>{" "}
+                <span className="text-white">{event.time || "Not set"}</span>
+              </div>
+              <div>
+                <span className="text-gray-400">Created:</span>{" "}
+                <span className="text-white">
+                  {event.createdAt
+                    ? format(
+                        new Date(event.createdAt),
+                        "MMM d, yyyy 'at' h:mm a"
+                      )
+                    : "Unknown"}
+                </span>
+              </div>
+              {event.createdBy && (
+                <div>
+                  <span className="text-gray-400">Created By:</span>{" "}
+                  <span className="text-white">{event.createdBy}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-lg font-semibold text-white mb-2">
+              Assignment
+            </h3>
+            <div className="space-y-2">
+              {event.assignedTo ? (
+                <>
+                  <div>
+                    <span className="text-gray-400">Assigned To:</span>{" "}
+                    <span className="text-white">{event.assignedTo}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Assigned On:</span>{" "}
+                    <span className="text-white">
+                      {event.assignedAt
+                        ? format(
+                            new Date(event.assignedAt),
+                            "MMM d, yyyy 'at' h:mm a"
+                          )
+                        : "Unknown"}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div className="text-yellow-500">Not assigned</div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 className="text-lg font-semibold text-white mb-2">
+            Participants
+          </h3>
+          <div className="grid grid-cols-2 gap-2">
+            {event.participants.map((participant, index) => (
+              <div
+                key={index}
+                className="bg-gray-800 p-2 rounded-md text-white flex items-center"
+              >
+                {typeof participant === "string"
+                  ? participant
+                  : participant.name || "Unknown Participant"}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {event.notes && (
+          <div>
+            <h3 className="text-lg font-semibold text-white mb-2">Notes</h3>
+            <div className="bg-gray-800 p-3 rounded-md text-white">
+              {event.notes}
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-between mt-6">
+          <div>
+            {event.status === "Needs Admin" && (
+              <Button
+                variant="outline"
+                className="bg-green-600 text-white border-green-500 hover:bg-green-500 mr-2"
+                onClick={() => {
+                  onClose();
+                  handleAssignEvent(event.id);
+                }}
+              >
+                <UserCheck className="h-4 w-4 mr-2" />
+                Assign Me
+              </Button>
+            )}
+            {(event.status === "Scheduled" ||
+              event.status === "Needs Admin") && (
+              <Button
+                variant="outline"
+                className="bg-blue-600 text-white border-blue-500 hover:bg-blue-500"
+                onClick={() => {
+                  onClose();
+                  handleEdit(event);
+                }}
+              >
+                <Edit className="h-4 w-4 mr-2" />
+                Edit
+              </Button>
+            )}
+            {event.status === "Scheduled" && (
+              <Button
+                variant="outline"
+                className="bg-purple-600 text-white border-purple-500 hover:bg-purple-500 ml-2"
+                onClick={() => {
+                  onClose();
+                  // Handle marking event as completed
+                  handleCompleteEvent(event.id);
+                }}
+              >
+                <Check className="h-4 w-4 mr-2" />
+                Mark Complete
+              </Button>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            className="bg-gray-800 text-white border-gray-700 hover:bg-gray-700"
+            onClick={onClose}
+          >
+            Close
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Add a function to handle completing events
+const handleCompleteEvent = async (eventId: string) => {
+  setIsLoading(true);
+  try {
+    // Update the event status to Completed
+    const updatedEvent = await updateEvent(eventId, {
+      status: "Completed",
+      completedAt: new Date(),
+    });
+
+    // Update the events list
+    setEvents((prev) => prev.map((e) => (e.id === eventId ? updatedEvent : e)));
+
+    toast({
+      title: "Event Completed",
+      description: "The event has been marked as completed",
+    });
+  } catch (error) {
+    console.error("Error completing event:", error);
+    toast({
+      title: "Error",
+      description: "Failed to complete event",
+      variant: "destructive",
+    });
+  } finally {
+    setIsLoading(false);
+  }
+};

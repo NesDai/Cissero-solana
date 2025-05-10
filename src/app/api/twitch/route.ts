@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTopStreams, getStreamByUsername } from "@/services/twitchService";
+import {
+  getTopStreams,
+  getStreamByUsername,
+  getTopGames,
+} from "@/services/twitchService";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -24,6 +28,12 @@ export async function GET(request: NextRequest) {
 
       const stream = await getStreamByUsername(username);
       return NextResponse.json({ stream });
+    }
+
+    if (action === "topGames") {
+      const limit = parseInt(searchParams.get("limit") || "10");
+      const games = await getTopGames(limit);
+      return NextResponse.json({ games });
     }
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });

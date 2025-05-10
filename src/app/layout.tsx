@@ -1,5 +1,6 @@
 import "./globals.css";
 import AppWalletProvider from "@/components/AppWalletProvider";
+import { Toaster } from "@/components/ui/toaster";
 
 export default function RootLayout({
   children,
@@ -8,10 +9,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>
-      <AppWalletProvider>
-          {children}
-      </AppWalletProvider>
+      <body suppressHydrationWarning={true}>
+        <AppWalletProvider>{children}</AppWalletProvider>
+        <Toaster />
       </body>
     </html>
   );

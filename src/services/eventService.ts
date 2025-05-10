@@ -16,7 +16,13 @@ export interface Event {
     | "Rejected";
   participants: Participant[];
   createdBy?: string; // Who created this event (admin or streamer name)
+  createdById?: string; // ID of the admin who created the event
+  assignedTo?: string; // ID of the admin assigned to this event
+  assignedToName?: string; // Name of the admin assigned to this event
+  lastModifiedBy?: string; // ID of the admin who last modified the event
+  lastModifiedAt?: Date; // When the event was last modified
   rejectionReason?: string; // Optional reason for rejection
+  rejectedBy?: string; // ID of the admin who rejected the event
 }
 
 // Mock data for development

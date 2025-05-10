@@ -1,5 +1,5 @@
 // Client-side service for Twitch data
-import { TwitchStream, TwitchUser } from "./twitchService";
+import { TwitchStream, TwitchUser, TwitchGame } from "./twitchService";
 
 /**
  * Get top streams
@@ -46,4 +46,23 @@ export async function getStreamByUsername(
 
   const data = await response.json();
   return data.stream;
+}
+
+/**
+ * Get top game categories
+ */
+export async function getTopGames(limit = 10): Promise<TwitchGame[]> {
+  const params = new URLSearchParams({
+    action: "topGames",
+    limit: limit.toString(),
+  });
+
+  const response = await fetch(`/api/twitch?${params.toString()}`);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch top games: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.games;
 }

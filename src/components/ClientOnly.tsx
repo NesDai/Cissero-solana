@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useState, ReactNode } from "react";
+import { useEffect, useState } from "react";
 
-export default function ClientOnly({ children }: { children: ReactNode }) {
+export default function ClientOnly({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const [hasMounted, setHasMounted] = useState(false);
 
   useEffect(() => {
@@ -10,7 +14,7 @@ export default function ClientOnly({ children }: { children: ReactNode }) {
   }, []);
 
   if (!hasMounted) {
-    return null;
+    return null; // Return nothing on the server side
   }
 
   return <>{children}</>;

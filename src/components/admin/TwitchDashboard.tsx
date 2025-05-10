@@ -6,16 +6,30 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   getTopStreams,
   getStreamByUsername,
+  getTopGames,
   TwitchStream,
-} from "@/services/twitchService";
-import { Loader2, ExternalLink, Search } from "lucide-react";
+  TwitchGame,
+} from "@/services/twitchClientService";
+import { Loader2, ExternalLink, Search, RefreshCw } from "lucide-react";
 import ClientOnly from "@/components/ClientOnly";
 
 export function TwitchDashboard() {
   const [topStreams, setTopStreams] = useState<TwitchStream[]>([]);
+  const [games, setGames] = useState<TwitchGame[]>([]);
+  const [selectedGameId, setSelectedGameId] = useState<string | undefined>(
+    undefined
+  );
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingGames, setIsLoadingGames] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchUsername, setSearchUsername] = useState("");
   const [searchedStream, setSearchedStream] = useState<TwitchStream | null>(
@@ -23,12 +37,12 @@ export function TwitchDashboard() {
   );
   const [isSearching, setIsSearching] = useState(false);
 
-  // Load top streams on mount
+  // Load top streams on mount or when game filter changes
   useEffect(() => {
     async function loadTopStreams() {
       setIsLoading(true);
       try {
-        const streams = await getTopStreams();
+        const streams = await getTopStreams(selectedGameId);
         setTopStreams(streams);
         setError(null);
       } catch (err) {
@@ -42,6 +56,23 @@ export function TwitchDashboard() {
     }
 
     loadTopStreams();
+  }, [selectedGameId]);
+
+  // Load games on mount
+  useEffect(() => {
+    async function loadGames() {
+      setIsLoadingGames(true);
+      try {
+        const gameData = await getTopGames(20);
+        setGames(gameData);
+      } catch (err) {
+        console.error("Failed to load Twitch games:", err);
+      } finally {
+        setIsLoadingGames(false);
+      }
+    }
+
+    loadGames();
   }, []);
 
   // Handle search
@@ -49,10 +80,10 @@ export function TwitchDashboard() {
     if (!searchUsername.trim()) return;
 
     setIsSearching(true);
+    setSearchedStream(null);
     try {
       const stream = await getStreamByUsername(searchUsername);
       setSearchedStream(stream);
-      setError(null);
     } catch (err) {
       console.error("Failed to search for stream:", err);
       setError("Failed to search for stream. Please try again.");
@@ -76,121 +107,168 @@ export function TwitchDashboard() {
     return url.replace("{width}", "320").replace("{height}", "180");
   };
 
+  // Format game box art
+  const formatGameBoxArt = (url: string): string => {
+    return url.replace("{width}", "144").replace("{height}", "192");
+  };
+
+  // Handle refresh
+  const handleRefresh = () => {
+    setIsLoading(true);
+    getTopStreams(selectedGameId)
+      .then((streams) => {
+        setTopStreams(streams);
+        setError(null);
+      })
+      .catch((err) => {
+        console.error("Failed to refresh streams:", err);
+        setError("Failed to refresh streams. Please try again.");
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  };
+
   return (
     <ClientOnly>
       <div className="space-y-6">
-        <Card className="bg-black bg-opacity-50 border-green-500 text-white">
+        <Card className="bg-gray-900 border-gray-700">
           <CardHeader>
-            <CardTitle className="text-[20px] text-white">
-              Twitch Dashboard
-            </CardTitle>
+            <CardTitle className="text-white">Twitch Dashboard</CardTitle>
           </CardHeader>
           <CardContent>
             {error && (
-              <div className="bg-red-900 text-white p-4 rounded-md mb-4">
+              <div className="bg-red-900 text-white p-3 rounded-md mb-4 text-sm">
                 {error}
               </div>
             )}
 
-            <div className="flex gap-2 mb-6">
-              <Input
-                placeholder="Search by username"
-                value={searchUsername}
-                onChange={(e) => setSearchUsername(e.target.value)}
-                className="bg-gray-800 border-gray-700 text-white"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    handleSearch();
-                  }
-                }}
-              />
-              <Button
-                variant="outline"
-                className="bg-green-600 text-white border-green-500 hover:bg-green-500"
-                onClick={handleSearch}
-                disabled={isSearching}
-              >
-                {isSearching ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Search className="h-4 w-4" />
-                )}
-                Search
-              </Button>
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-white mb-2">
+                Search for a Stream
+              </h2>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Enter Twitch username"
+                  value={searchUsername}
+                  onChange={(e) => setSearchUsername(e.target.value)}
+                  className="bg-gray-800 border-gray-700 text-white"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleSearch();
+                    }
+                  }}
+                />
+                <Button
+                  className="bg-purple-700 hover:bg-purple-600 text-white"
+                  onClick={handleSearch}
+                  disabled={isSearching || !searchUsername.trim()}
+                >
+                  {isSearching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Search className="h-4 w-4" />
+                  )}
+                  <span className="ml-2">Search</span>
+                </Button>
+              </div>
             </div>
 
             {searchedStream && (
-              <Card className="bg-gray-900 border-gray-700 mb-6">
-                <CardHeader className="pb-2">
-                  <div className="flex justify-between items-start">
-                    <CardTitle className="text-white text-lg">
-                      {searchedStream.user_name}
-                    </CardTitle>
-                    <Badge className="bg-red-600 text-white">LIVE</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="md:col-span-1">
+              <Card className="bg-gray-800 border-gray-700 mb-6">
+                <CardContent className="p-4">
+                  <div className="flex flex-col md:flex-row gap-4">
+                    <div className="relative w-full md:w-1/3">
                       <img
                         src={formatThumbnail(searchedStream.thumbnail_url)}
                         alt={searchedStream.title}
                         className="w-full rounded-md"
                       />
+                      <div className="absolute top-2 right-2">
+                        <Badge className="bg-red-600 text-white">
+                          {formatViewers(searchedStream.viewer_count)} viewers
+                        </Badge>
+                      </div>
                     </div>
-                    <div className="md:col-span-2">
-                      <h3 className="text-white font-medium mb-2">
+                    <div className="flex-1">
+                      <h3 className="text-white font-semibold text-lg mb-2">
                         {searchedStream.title}
                       </h3>
-                      <div className="grid grid-cols-2 gap-2 text-sm">
-                        <div className="text-gray-400">Game:</div>
-                        <div className="text-white">
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        <Badge className="bg-blue-600 text-white">
+                          {searchedStream.user_name}
+                        </Badge>
+                        <Badge className="bg-green-600 text-white">
                           {searchedStream.game_name}
-                        </div>
-
-                        <div className="text-gray-400">Viewers:</div>
-                        <div className="text-white">
-                          {formatViewers(searchedStream.viewer_count)}
-                        </div>
-
-                        <div className="text-gray-400">Started:</div>
-                        <div className="text-white">
-                          {new Date(searchedStream.started_at).toLocaleString()}
-                        </div>
+                        </Badge>
+                        <Badge className="bg-gray-700 text-gray-300">
+                          {searchedStream.language.toUpperCase()}
+                        </Badge>
                       </div>
-
-                      <div className="mt-4">
-                        <Button
-                          variant="outline"
-                          className="bg-purple-700 text-white border-purple-600 hover:bg-purple-600"
-                          onClick={() =>
-                            window.open(
-                              `https://twitch.tv/${searchedStream.user_login}`,
-                              "_blank"
-                            )
-                          }
-                        >
-                          <ExternalLink className="h-4 w-4 mr-2" />
-                          Watch Stream
-                        </Button>
-                      </div>
+                      <p className="text-gray-400 text-sm mb-4">
+                        Started streaming{" "}
+                        {new Date(searchedStream.started_at).toLocaleString()}
+                      </p>
+                      <Button
+                        variant="outline"
+                        className="bg-purple-700 text-white border-purple-600 hover:bg-purple-600"
+                        onClick={() =>
+                          window.open(
+                            `https://twitch.tv/${searchedStream.user_login}`,
+                            "_blank"
+                          )
+                        }
+                      >
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        Watch Stream
+                      </Button>
                     </div>
                   </div>
                 </CardContent>
               </Card>
             )}
 
-            <h2 className="text-xl font-bold text-white mb-4">Top Streams</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-white">Top Streams</h2>
+              <div className="flex gap-2 items-center">
+                <Select
+                  value={selectedGameId}
+                  onValueChange={setSelectedGameId}
+                  disabled={isLoadingGames}
+                >
+                  <SelectTrigger className="w-[180px] bg-gray-800 border-gray-700 text-white">
+                    <SelectValue placeholder="All Categories" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-800 border-gray-700 text-white">
+                    <SelectItem value={undefined}>All Categories</SelectItem>
+                    {games.map((game) => (
+                      <SelectItem key={game.id} value={game.id}>
+                        {game.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="bg-gray-800 border-gray-700 text-white hover:bg-gray-700"
+                  onClick={handleRefresh}
+                  disabled={isLoading}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
 
             {isLoading ? (
               <div className="text-center py-8">
-                <div className="animate-spin h-8 w-8 border-4 border-green-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+                <div className="animate-spin h-8 w-8 border-4 border-purple-500 border-t-transparent rounded-full mx-auto mb-4"></div>
                 <p className="text-gray-400">Loading streams...</p>
               </div>
             ) : topStreams.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {topStreams.map((stream) => (
-                  <Card key={stream.id} className="bg-gray-900 border-gray-700">
+                  <Card key={stream.id} className="bg-gray-800 border-gray-700">
                     <div className="relative">
                       <img
                         src={formatThumbnail(stream.thumbnail_url)}

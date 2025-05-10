@@ -123,6 +123,13 @@ export interface TwitchUser {
   created_at: string;
 }
 
+// Add TwitchGame interface
+export interface TwitchGame {
+  id: string;
+  name: string;
+  box_art_url: string;
+}
+
 /**
  * Get top streams
  */
@@ -152,8 +159,8 @@ export async function getUsersByIds(userIds: string[]): Promise<TwitchUser[]> {
   if (userIds.length === 0) return [];
 
   const params: Record<string, string> = {};
-  userIds.forEach((id, index) => {
-    params[`id=${index}`] = id;
+  userIds.forEach((id) => {
+    params[`id`] = id;
   });
 
   const response = await twitchApiRequest<{ data: TwitchUser[] }>(
@@ -172,8 +179,8 @@ export async function getUsersByNames(
   if (usernames.length === 0) return [];
 
   const params: Record<string, string> = {};
-  usernames.forEach((name, index) => {
-    params[`login=${index}`] = name;
+  usernames.forEach((name) => {
+    params[`login`] = name;
   });
 
   const response = await twitchApiRequest<{ data: TwitchUser[] }>(
@@ -184,33 +191,65 @@ export async function getUsersByNames(
 }
 
 /**
- * Check if a stream is live
+ * Get games by IDs
  */
-export async function isStreamLive(username: string): Promise<boolean> {
-  const response = await twitchApiRequest<{ data: TwitchStream[] }>("streams", {
-    user_login: username,
+export async function getGamesByIds(gameIds: string[]): Promise<TwitchGame[]> {
+  if (gameIds.length === 0) return [];
+
+  const params: Record<string, string> = {};
+  gameIds.forEach((id) => {
+    params[`id`] = id;
   });
-  return response.data.length > 0;
+
+  const response = await twitchApiRequest<{ data: TwitchGame[] }>(
+    "games",
+    params
+  );
+  return response.data;
+}
+
+/**
+ * Get games by names
+ */
+export async function getGamesByNames(
+  gameNames: string[]
+): Promise<TwitchGame[]> {
+  if (gameNames.length === 0) return [];
+
+  const params: Record<string, string> = {};
+  gameNames.forEach((name) => {
+    params[`name`] = name;
+  });
+
+  const response = await twitchApiRequest<{ data: TwitchGame[] }>(
+    "games",
+    params
+  );
+  return response.data;
 }
 
 /**
  * Get stream information for a specific user
  */
-export async function getStreamByUsername(
-  username: string
+export async function getStreamByUserId(
+  userId: string
 ): Promise<TwitchStream | null> {
   const response = await twitchApiRequest<{ data: TwitchStream[] }>("streams", {
-    user_login: username,
+    user_id: userId,
   });
   return response.data.length > 0 ? response.data[0] : null;
 }
 
 /**
- * Get channel information
+ * Search for categories (games)
  */
-export async function getChannelInfo(broadcasterId: string) {
-  const response = await twitchApiRequest<{ data: any[] }>("channels", {
-    broadcaster_id: broadcasterId,
-  });
-  return response.data[0];
+export async function searchCategories(
+  query: string,
+  limit = 10
+): Promise<TwitchGame[]> {
+  const response = await twitchApiRequest<{ data: TwitchGame[] }>(
+    "search/categories",
+    { query, first: limit.toString() }
+  );
+  return response.data;
 }
