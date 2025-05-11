@@ -14,7 +14,7 @@ export default function ClientOnly({
   }, []);
 
   if (!hasMounted) {
-    return null; // Return nothing on the server side
+    return null;
   }
 
   return <>{children}</>;

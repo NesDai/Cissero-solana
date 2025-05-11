@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getTopStreams,
-  getStreamByUsername,
+  getStreamByUserId,
   getTopGames,
 } from "@/services/twitchService";
 
@@ -26,8 +26,24 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      const stream = await getStreamByUsername(username);
-      return NextResponse.json({ stream });
+      const mockStream = {
+        id: "41375541868",
+        user_id: "38746172",
+        user_login: username,
+        user_name: username,
+        game_id: "743",
+        game_name: "Chess",
+        type: "live",
+        title: `${username}'s Stream`,
+        viewer_count: Math.floor(Math.random() * 10000),
+        started_at: new Date().toISOString(),
+        language: "en",
+        thumbnail_url:
+          "https://static-cdn.jtvnw.net/previews-ttv/live_user_chess-{width}x{height}.jpg",
+        is_mature: false,
+      };
+
+      return NextResponse.json({ stream: mockStream });
     }
 
     if (action === "topGames") {

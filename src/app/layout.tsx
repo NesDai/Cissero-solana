@@ -1,16 +1,25 @@
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
-import AppWalletProvider from "@/components/AppWalletProvider";
 import { Toaster } from "@/components/ui/toaster";
+
+const inter = Inter({ subsets: ["latin"] });
+
+export const metadata: Metadata = {
+  title: "Prediction Platform",
+  description:
+    "A platform for streamers and viewers to engage with predictions",
+};
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="en">
-      <body suppressHydrationWarning={true}>
-        <AppWalletProvider>{children}</AppWalletProvider>
+      <body className={inter.className}>
+        {children}
         <Toaster />
       </body>
     </html>
