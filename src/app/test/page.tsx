@@ -4,12 +4,13 @@ import { Button } from "@/components/ui/button"
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui"
 import { useConnection, useWallet } from "@solana/wallet-adapter-react"
 import { useEffect, useState } from "react"
-import {Connection, LAMPORTS_PER_SOL, PublicKey} from "@solana/web3.js"
+import { LAMPORTS_PER_SOL } from "@solana/web3.js"
 import {deleteDocument, fetchData, fetchDataBy, fetchDataByQuery, insertData, sendSOL, updateField} from "@/app/utils"
 import { loginWithGoogle, userSignOut } from "@/lib/firebase/auth"
 import { UserAuth } from "@/contexts/authContext"
 import {Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle} from "@/components/ui/card";
 import {Input} from "@/components/ui/input";
+import dynamic from 'next/dynamic'
 
 export default function Test() {
     const [balance, setBalance] = useState(0)
@@ -32,6 +33,13 @@ export default function Test() {
     // user is metadata of user
     // userdata is data from firebase
     const { user } = UserAuth();
+
+
+    const WalletMultiButtonDynamic = dynamic(
+        async () => (await import('@solana/wallet-adapter-react-ui')).WalletMultiButton,
+        { ssr: false }
+    );
+
 
     // // this is to suspend when user change for ui changes
     // useEffect(() => {
@@ -125,11 +133,11 @@ export default function Test() {
                     <CardDescription>Test wallet connection</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <WalletMultiButton>
+                    <WalletMultiButtonDynamic>
                         <p className="text-sm">
                             {publicKey ? "Connected" : "Connect Wallet"}
                         </p>
-                    </WalletMultiButton>
+                    </WalletMultiButtonDynamic>
                 </CardContent>
                 <CardFooter>
                     {publicKey &&
