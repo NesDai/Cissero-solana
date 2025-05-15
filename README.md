@@ -6,7 +6,7 @@ Cissero is a Web3-based esports prediction platform that allows users to forecas
 Built on Solana blockchain technology, Cissero ensures transparency, fairness, and decentralized participation in esports 
 event predictions.
 
-Hosted Link: [www.cissero=solana.vercel.app](https://cissero-solana.vercel.app)
+Hosted Link: [www.cissero-solana.vercel.app](https://cissero-solana.vercel.app)
 
 ## Getting Started
 
