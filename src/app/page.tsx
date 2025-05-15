@@ -79,7 +79,7 @@ export default function Home() {
       <section className="px-4 sm:px-6 py-16 text-center">
         <h2 className="text-3xl font-bold text-white mb-4">Coming Soon</h2>
         <p className="text-muted-foreground max-w-md mx-auto">
-          We're cooking up even more ways to make your predictions matter. Stay tuned!
+          We are cooking up even more ways to make your predictions matter. Stay tuned!
         </p>
       </section>
     </BaseLayout>
