@@ -19,12 +19,13 @@ export default function AppWalletProvider({
 }) {
     const network = WalletAdapterNetwork.Devnet;
     const endpoint = useMemo(() => clusterApiUrl(network), [network]);
+    const networkDep = [network];
     const wallets = useMemo(
         () => [
             new PhantomWalletAdapter(),
             // Add other wallets here
-        ],
-        [network]
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+        ], networkDep
     );
 
     return (
